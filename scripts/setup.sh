@@ -308,7 +308,7 @@ wait_for_health() {
         local response
         if response=$(curl -s --max-time 5 "${HEALTH_ENDPOINT}" 2>/dev/null); then
             # Check if response indicates healthy status
-            if echo "${response}" | grep -qi "healthy"; then
+            if echo "${response}" | grep -qiE "(healthy|ok)"; then
                 printf "\r"  # Clear spinner line
                 success "Arbiter is healthy! (attempt ${attempt}/${MAX_HEALTH_RETRIES})"
                 info "Response: ${response}"

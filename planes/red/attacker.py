@@ -499,5 +499,11 @@ def main() -> None:
         print(json.dumps(results, indent=2, default=str))
 
 
+    else:
+        logger.info("Red Plane ready in standby mode. Awaiting attack commands...")
+        while True:
+            time.sleep(3600)
+
+
 if __name__ == "__main__":
     main()
