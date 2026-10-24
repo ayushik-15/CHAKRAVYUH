@@ -175,9 +175,10 @@ jobs:
         with:
           name: leak-suite-report-${{ github.run_number }}
           path: leak-suite/results/
+          if-no-files-found: warn
           retention-days: 30
 
-      # ── 12. Post summary to PR ────────────────────────────────────────────
+      # ── 12. Post summary to PR ────────────────────────────────────
       - name: "💬 Post summary to PR"
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
