@@ -18,6 +18,7 @@ from jose import JWTError, jwt
 
 from config import settings
 from routers.health import router as health_router
+from routers.rounds import router as rounds_router
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -107,3 +108,4 @@ async def inject_plane_identity(request: Request, call_next):
 
 # ── Routers ──────────────────────────────────────────────────────────────────
 app.include_router(health_router)
+app.include_router(rounds_router)

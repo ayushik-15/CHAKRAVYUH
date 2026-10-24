@@ -51,5 +51,15 @@ class EvalEvent(BaseModel):
         description="Optional cryptographic signature for integrity verification.",
     )
 
-    model_config = {"json_schema_extra": {"examples": [{"event_type": "ROUND_START", "round_id": "550e8400-e29b-41d4-a716-446655440000", "data": {"initiated_by": "red-plane"}}]}}
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "event_type": "ROUND_START",
+                    "round_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "data": {"initiated_by": "red-plane"},
+                }
+            ]
+        }
+    }
 
