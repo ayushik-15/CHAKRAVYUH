@@ -36,10 +36,10 @@ services:
     ports:
       - "8000:8000"
     networks:
+      - net-internal
       - net-red
       - net-blue
       - net-llm
-      - net-internal
     env_file:
       - .env
     restart: unless-stopped

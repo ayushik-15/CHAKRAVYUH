@@ -23,7 +23,6 @@ permissions:
   pull-requests: write
   issues: write
 
-# Cancel in-progress runs for the same branch/PR to save resources
 concurrency:
   group: leak-suite-${{ github.ref }}
   cancel-in-progress: true
@@ -88,19 +87,19 @@ jobs:
           echo "Starting core services (postgres, merkle-log, arbiter)..."
           docker compose up -d postgres merkle-log arbiter
           echo "Waiting for services to initialize..."
-          sleep 10
+          sleep 5
 
       # ── 7. Wait for Arbiter health check ──────────────────────────────────
       - name: "💓 Wait for Arbiter to be healthy"
         run: |
           echo "Polling arbiter health endpoint..."
-          MAX_RETRIES=20
-          RETRY_INTERVAL=5
+          MAX_RETRIES=25
+          RETRY_INTERVAL=3
           attempt=0
           while [ $attempt -lt $MAX_RETRIES ]; do
             attempt=$((attempt + 1))
             echo "  Attempt ${attempt}/${MAX_RETRIES}..."
-            RESPONSE=$(curl -s --max-time 5 http://localhost:8000/health || true)
+            RESPONSE=$(curl -s --max-time 3 http://localhost:8000/health 2>/dev/null || docker compose exec -T arbiter python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health').read().decode())" 2>/dev/null || true)
             echo "  Response: ${RESPONSE}"
             if echo "${RESPONSE}" | grep -qiE "(healthy|ok)"; then
               echo "✅ Arbiter is healthy!"
@@ -109,7 +108,7 @@ jobs:
             sleep $RETRY_INTERVAL
           done
           echo "❌ Arbiter did not become healthy within $((MAX_RETRIES * RETRY_INTERVAL))s"
-          docker compose logs arbiter
+          docker compose logs
           exit 1
 
       # ── 8. Start remaining services (planes) ─────────────────────────────
@@ -117,8 +116,8 @@ jobs:
         run: |
           echo "Starting Red, Blue, and LLM planes..."
           docker compose up -d red-plane blue-plane llm-plane
-          echo "Waiting for planes to initialize..."
-          sleep 5
+          sleep 3
+          docker compose ps
           echo "✅ All planes started"
 
       # ── 9. Run the Leak Suite ─────────────────────────────────────────────

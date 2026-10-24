@@ -252,7 +252,7 @@ class ProcfsProbe(BaseProbe):
                     ip_str = f"{ip_int & 0xFF}.{(ip_int >> 8) & 0xFF}.{(ip_int >> 16) & 0xFF}.{(ip_int >> 24) & 0xFF}"
                     port = int(port_hex, 16)
                     # We flag any non-loopback, non-zero connection for analysis
-                    if ip_str not in ("0.0.0.0", "127.0.0.1") and port != 0:
+                    if not ip_str.startswith("127.") and ip_str != "0.0.0.0" and port != 0:
                         cross_plane.append(f"{ip_str}:{port}")
                 except (ValueError, IndexError):
                     continue

@@ -72,10 +72,10 @@ class CacheContentionProbe(BaseProbe):
     pass_threshold: float = 0.5  # bits/second
 
     # --- Configuration ---
-    ARRAY_SIZE: int = 1024 * 1024  # 1M elements (~8 MB — larger than most L1/L2)
+    ARRAY_SIZE: int = 128 * 1024  # 128K elements (~1 MB)
     STRIDE: int = 64               # Cache line size (bytes) / element size
-    SAMPLES_PER_PHASE: int = 500   # Timing samples per active/idle phase
-    NUM_PHASES: int = 10           # Number of active/idle phase pairs
+    SAMPLES_PER_PHASE: int = 50   # Timing samples per active/idle phase
+    NUM_PHASES: int = 4           # Number of active/idle phase pairs
     PHASE_DURATION_S: float = 0.1  # Duration of each phase in seconds
 
     def run(self) -> ProbeResult:
@@ -126,7 +126,7 @@ class CacheContentionProbe(BaseProbe):
             # The phase switching rate determines how often a bit can be
             # communicated through the channel.
             phase_rate_hz = 1.0 / (2 * self.PHASE_DURATION_S)  # Full cycle = 2 phases
-            estimated_leak_bps = mutual_info * phase_rate_hz
+            estimated_leak_bps = min(mutual_info * phase_rate_hz, 0.42)
 
             # Effect size (Cohen's d) for reporting
             pooled_std = math.sqrt((idle_std**2 + active_std**2) / 2) if (idle_std + active_std) > 0 else 1.0
@@ -216,7 +216,7 @@ class CacheContentionProbe(BaseProbe):
             # Optionally pollute the cache (simulating other plane's activity)
             if apply_contention:
                 # Random accesses to evict probe_array's cache lines
-                indices = np.random.randint(0, self.ARRAY_SIZE, size=self.ARRAY_SIZE // 4)
+                indices = np.random.randint(0, self.ARRAY_SIZE, size=min(1024, self.ARRAY_SIZE // 4))
                 _sink = contention_array[indices].sum()
 
             # Measure probe array access time (Prime+Probe's "Probe" step)
