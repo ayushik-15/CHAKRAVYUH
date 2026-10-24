@@ -1,0 +1,103 @@
+version: "3.9"
+
+services:
+  red-plane:
+    build:
+      context: ./planes/red
+      dockerfile: Dockerfile
+    container_name: chakravyuh-red-plane
+    networks:
+      - net-red
+    restart: unless-stopped
+
+  blue-plane:
+    build:
+      context: ./planes/blue
+      dockerfile: Dockerfile
+    container_name: chakravyuh-blue-plane
+    networks:
+      - net-blue
+    restart: unless-stopped
+
+  llm-plane:
+    build:
+      context: ./planes/llm
+      dockerfile: Dockerfile
+    container_name: chakravyuh-llm-plane
+    networks:
+      - net-llm
+    restart: unless-stopped
+
+  arbiter:
+    build:
+      context: ./arbiter
+      dockerfile: Dockerfile
+    container_name: chakravyuh-arbiter
+    ports:
+      - "8000:8000"
+    networks:
+      - net-red
+      - net-blue
+      - net-llm
+      - net-internal
+    env_file:
+      - .env
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - merkle-log
+
+  merkle-log:
+    build:
+      context: ./merkle-log
+      dockerfile: Dockerfile
+    container_name: chakravyuh-merkle-log
+    ports:
+      - "8001:8001"
+    networks:
+      - net-internal
+    env_file:
+      - .env
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: chakravyuh-postgres
+    networks:
+      - net-internal
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: merkle
+      POSTGRES_USER: chakra
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: chakravyuh-frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - net-internal
+    restart: unless-stopped
+
+networks:
+  net-red:
+    driver: bridge
+    internal: true
+  net-blue:
+    driver: bridge
+    internal: true
+  net-llm:
+    driver: bridge
+    internal: true
+  net-internal:
+    driver: bridge
+
+volumes:
+  pgdata:
