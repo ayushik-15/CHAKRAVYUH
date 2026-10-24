@@ -1,0 +1,287 @@
+# =============================================================================
+# CHAKRAVYUH — Cilium eBPF Network Policy (Kubernetes-style)
+# =============================================================================
+# This file documents the intended Cilium eBPF micro-segmentation policy for
+# production deployment on k3s. In the prototype, equivalent isolation is
+# achieved via Docker bridge networks (net-red, net-blue, net-llm, net-internal).
+#
+# Policy summary:
+#   - Each plane (Red, Blue, LLM) can ONLY egress to arbiter:8000
+#   - Arbiter can ONLY egress to merkle-log:8001 and postgres:5432
+#   - Default DENY all other traffic
+# =============================================================================
+
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: chakravyuh-default-deny
+  namespace: chakravyuh
+spec:
+  description: "Default deny all ingress and egress traffic in the chakravyuh namespace"
+  endpointSelector: {}
+  ingress:
+    - {}
+  ingressDeny:
+    - fromEndpoints:
+        - {}
+  egress:
+    - {}
+  egressDeny:
+    - toEndpoints:
+        - {}
+
+---
+# =============================================================================
+# Red Plane — Egress ONLY to Arbiter on port 8000
+# =============================================================================
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: chakravyuh-red-plane-egress
+  namespace: chakravyuh
+spec:
+  description: "Red plane can only communicate with the Arbiter on port 8000"
+  endpointSelector:
+    matchLabels:
+      app: red-plane
+      plane: red
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: arbiter
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+    # Allow DNS resolution within the cluster
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+  ingressDeny:
+    - fromEndpoints:
+        - matchLabels:
+            plane: blue
+        - matchLabels:
+            plane: llm
+
+---
+# =============================================================================
+# Blue Plane — Egress ONLY to Arbiter on port 8000
+# =============================================================================
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: chakravyuh-blue-plane-egress
+  namespace: chakravyuh
+spec:
+  description: "Blue plane can only communicate with the Arbiter on port 8000"
+  endpointSelector:
+    matchLabels:
+      app: blue-plane
+      plane: blue
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: arbiter
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+    # Allow DNS resolution within the cluster
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+  ingressDeny:
+    - fromEndpoints:
+        - matchLabels:
+            plane: red
+        - matchLabels:
+            plane: llm
+
+---
+# =============================================================================
+# LLM Plane — Egress ONLY to Arbiter on port 8000
+# =============================================================================
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: chakravyuh-llm-plane-egress
+  namespace: chakravyuh
+spec:
+  description: "LLM plane can only communicate with the Arbiter on port 8000"
+  endpointSelector:
+    matchLabels:
+      app: llm-plane
+      plane: llm
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: arbiter
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+    # Allow DNS resolution within the cluster
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+  ingressDeny:
+    - fromEndpoints:
+        - matchLabels:
+            plane: red
+        - matchLabels:
+            plane: blue
+
+---
+# =============================================================================
+# Arbiter — Egress to Merkle-Log (8001) and PostgreSQL (5432) ONLY
+# =============================================================================
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: chakravyuh-arbiter-egress
+  namespace: chakravyuh
+spec:
+  description: "Arbiter can only reach merkle-log on port 8001 and postgres on port 5432"
+  endpointSelector:
+    matchLabels:
+      app: arbiter
+  ingress:
+    # Accept traffic from all three planes on port 8000
+    - fromEndpoints:
+        - matchLabels:
+            plane: red
+        - matchLabels:
+            plane: blue
+        - matchLabels:
+            plane: llm
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: merkle-log
+      toPorts:
+        - ports:
+            - port: "8001"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app: postgres
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # Allow DNS resolution within the cluster
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+
+---
+# =============================================================================
+# Merkle-Log — Egress to PostgreSQL (5432) ONLY, Ingress from Arbiter (8001)
+# =============================================================================
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: chakravyuh-merkle-log-egress
+  namespace: chakravyuh
+spec:
+  description: "Merkle-log can only reach postgres on port 5432 and accept ingress from arbiter"
+  endpointSelector:
+    matchLabels:
+      app: merkle-log
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: arbiter
+      toPorts:
+        - ports:
+            - port: "8001"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: postgres
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # Allow DNS resolution within the cluster
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+
+---
+# =============================================================================
+# PostgreSQL — Ingress from Arbiter and Merkle-Log ONLY, No Egress
+# =============================================================================
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: chakravyuh-postgres
+  namespace: chakravyuh
+spec:
+  description: "PostgreSQL accepts connections only from arbiter and merkle-log, no egress"
+  endpointSelector:
+    matchLabels:
+      app: postgres
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: arbiter
+        - matchLabels:
+            app: merkle-log
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+  egress:
+    # Allow DNS resolution only
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP

@@ -1,0 +1,79 @@
+{
+  "defaultAction": "SCMP_ACT_ERRNO",
+  "archMap": [
+    {
+      "architecture": "SCMP_ARCH_X86_64",
+      "subArchitectures": [
+        "SCMP_ARCH_X86",
+        "SCMP_ARCH_X32"
+      ]
+    }
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "read",
+        "write",
+        "open",
+        "openat",
+        "close",
+        "fstat",
+        "stat",
+        "lstat",
+        "poll",
+        "lseek",
+        "mmap",
+        "mprotect",
+        "munmap",
+        "brk",
+        "ioctl",
+        "access",
+        "pipe",
+        "select",
+        "sched_yield",
+        "mremap",
+        "socket",
+        "connect",
+        "sendto",
+        "recvfrom",
+        "sendmsg",
+        "recvmsg",
+        "bind",
+        "listen",
+        "accept",
+        "clone",
+        "execve",
+        "exit",
+        "exit_group",
+        "getpid",
+        "getuid",
+        "getgid",
+        "gettid",
+        "futex",
+        "epoll_create",
+        "epoll_ctl",
+        "epoll_wait",
+        "nanosleep",
+        "clock_gettime",
+        "getrandom"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "names": [
+        "ptrace",
+        "mount",
+        "umount",
+        "umount2",
+        "reboot",
+        "sethostname",
+        "pivot_root",
+        "chroot",
+        "kexec_load"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Explicitly blocked dangerous syscalls — container escape, privilege escalation, and host manipulation vectors"
+    }
+  ]
+}
