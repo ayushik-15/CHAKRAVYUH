@@ -1,0 +1,238 @@
+# =============================================================================
+# CHAKRAVYUH — Leak Suite CI Workflow
+# =============================================================================
+# Runs the full covert-channel leak suite on every push to main and on pull
+# requests. Builds all containers, executes all probes, and uploads the
+# benchmark report as a GitHub Actions artifact.
+#
+# The workflow FAILS if any probe reports a leak above the allowed threshold.
+# =============================================================================
+
+name: "🛡️ Leak Suite — Covert Channel Probes"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Cancel in-progress runs for the same branch/PR to save resources
+concurrency:
+  group: leak-suite-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Default environment variables for the test environment
+  POSTGRES_PASSWORD: chakravyuh_ci
+  ARBITER_HOST: arbiter
+  ARBITER_PORT: "8000"
+  MERKLE_HOST: merkle-log
+  MERKLE_PORT: "8001"
+  LLM_MODEL: qwen2.5:0.5b
+  JWT_SECRET: ci-test-secret-not-for-production
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job: leak-suite
+  # Builds all containers, runs the leak suite, uploads report
+  # ─────────────────────────────────────────────────────────────────────────────
+  leak-suite:
+    name: "Run Covert Channel Probes"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ── 1. Checkout repository ────────────────────────────────────────────
+      - name: "📥 Checkout repository"
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Docker Buildx for layer caching ─────────────────────────
+      - name: "🐳 Set up Docker Buildx"
+        uses: docker/setup-buildx-action@v3
+
+      # ── 3. Cache Docker layers to speed up subsequent builds ──────────────
+      - name: "💾 Cache Docker layers"
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ hashFiles('**/Dockerfile', '**/requirements.txt', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      # ── 4. Create .env file for CI ────────────────────────────────────────
+      - name: "📝 Create CI environment file"
+        run: |
+          cat > .env << EOF
+          POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }}
+          ARBITER_HOST=${{ env.ARBITER_HOST }}
+          ARBITER_PORT=${{ env.ARBITER_PORT }}
+          MERKLE_HOST=${{ env.MERKLE_HOST }}
+          MERKLE_PORT=${{ env.MERKLE_PORT }}
+          LLM_MODEL=${{ env.LLM_MODEL }}
+          JWT_SECRET=${{ env.JWT_SECRET }}
+          EOF
+          echo "✅ .env file created for CI"
+
+      # ── 5. Build all containers ───────────────────────────────────────────
+      - name: "🔨 Build all Docker containers"
+        run: |
+          echo "Building all CHAKRAVYUH containers..."
+          docker compose build --parallel
+          echo "✅ All containers built successfully"
+
+      # ── 6. Start infrastructure services ──────────────────────────────────
+      - name: "🚀 Start infrastructure services"
+        run: |
+          echo "Starting core services (postgres, merkle-log, arbiter)..."
+          docker compose up -d postgres merkle-log arbiter
+          echo "Waiting for services to initialize..."
+          sleep 10
+
+      # ── 7. Wait for Arbiter health check ──────────────────────────────────
+      - name: "💓 Wait for Arbiter to be healthy"
+        run: |
+          echo "Polling arbiter health endpoint..."
+          MAX_RETRIES=20
+          RETRY_INTERVAL=5
+          attempt=0
+          while [ $attempt -lt $MAX_RETRIES ]; do
+            attempt=$((attempt + 1))
+            echo "  Attempt ${attempt}/${MAX_RETRIES}..."
+            if curl -s --max-time 5 http://localhost:8000/health | grep -qi "healthy"; then
+              echo "✅ Arbiter is healthy!"
+              exit 0
+            fi
+            sleep $RETRY_INTERVAL
+          done
+          echo "❌ Arbiter did not become healthy within $((MAX_RETRIES * RETRY_INTERVAL))s"
+          docker compose logs arbiter
+          exit 1
+
+      # ── 8. Start remaining services (planes) ─────────────────────────────
+      - name: "🚀 Start plane containers"
+        run: |
+          echo "Starting Red, Blue, and LLM planes..."
+          docker compose up -d red-plane blue-plane llm-plane
+          echo "Waiting for planes to initialize..."
+          sleep 10
+          echo "✅ All planes started"
+
+      # ── 9. Run the Leak Suite ─────────────────────────────────────────────
+      - name: "🔬 Run Leak Suite probes"
+        id: leak_suite
+        run: |
+          echo "═══════════════════════════════════════════════════════════════"
+          echo "  🛡️  CHAKRAVYUH — Running Covert Channel Leak Suite"
+          echo "═══════════════════════════════════════════════════════════════"
+          echo ""
+
+          # Create results directory on host for report extraction
+          mkdir -p leak-suite/results
+
+          # Run the leak suite container
+          # The runner.py exits with code 1 if any probe fails
+          docker compose run \
+            --rm \
+            --name chakravyuh-leak-runner \
+            -e ARBITER_URL=http://arbiter:8000 \
+            -e LLM_URL=http://llm-plane:8080 \
+            leak-suite \
+            python runner.py --probe all --output /app/results/report.md
+
+          SUITE_EXIT_CODE=$?
+
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════"
+          if [ $SUITE_EXIT_CODE -eq 0 ]; then
+            echo "  ✅ All probes passed — no covert channels detected"
+          else
+            echo "  ❌ One or more probes FAILED — potential covert channel detected"
+          fi
+          echo "═══════════════════════════════════════════════════════════════"
+
+          # Store exit code for later use
+          echo "suite_exit_code=${SUITE_EXIT_CODE}" >> $GITHUB_OUTPUT
+
+          exit $SUITE_EXIT_CODE
+
+      # ── 10. Generate benchmark report ─────────────────────────────────────
+      - name: "📊 Generate benchmark report"
+        if: always()
+        run: |
+          echo "Generating benchmark report..."
+
+          # Try to run the report generator
+          docker compose run \
+            --rm \
+            --name chakravyuh-report-gen \
+            leak-suite \
+            python report.py || echo "⚠️  Report generation had issues (non-critical)"
+
+          # Copy report from container volume if it exists
+          if [ -f "leak-suite/results/report.md" ]; then
+            echo "✅ Report generated: leak-suite/results/report.md"
+            echo ""
+            echo "────────────── Report Preview ──────────────"
+            head -50 leak-suite/results/report.md
+            echo "─────────────────────────────────────────────"
+          else
+            echo "⚠️  No report file found — creating summary from logs"
+            mkdir -p leak-suite/results
+            echo "# Leak Suite Report (CI Run)" > leak-suite/results/report.md
+            echo "" >> leak-suite/results/report.md
+            echo "**Run:** ${{ github.run_id }}" >> leak-suite/results/report.md
+            echo "**Commit:** ${{ github.sha }}" >> leak-suite/results/report.md
+            echo "**Date:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> leak-suite/results/report.md
+            echo "" >> leak-suite/results/report.md
+            echo "Report generation incomplete — check workflow logs for details." >> leak-suite/results/report.md
+          fi
+
+      # ── 11. Upload report as artifact ─────────────────────────────────────
+      - name: "📦 Upload leak suite report"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leak-suite-report-${{ github.run_number }}
+          path: |
+            leak-suite/results/
+          retention-days: 30
+
+      # ── 12. Post summary to PR ────────────────────────────────────────────
+      - name: "💬 Post summary to PR"
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let reportContent = '⚠️ Report not available';
+
+            try {
+              reportContent = fs.readFileSync('leak-suite/results/report.md', 'utf8');
+              // Truncate if too long for a PR comment
+              if (reportContent.length > 60000) {
+                reportContent = reportContent.substring(0, 60000) + '\n\n... (truncated)';
+              }
+            } catch (e) {
+              reportContent = '⚠️ Could not read report file.';
+            }
+
+            const suiteResult = '${{ steps.leak_suite.outputs.suite_exit_code }}';
+            const statusEmoji = suiteResult === '0' ? '✅' : '❌';
+            const statusText = suiteResult === '0' ? 'PASSED' : 'FAILED';
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## ${statusEmoji} Leak Suite Results: ${statusText}\n\n<details>\n<summary>Click to expand full report</summary>\n\n${reportContent}\n\n</details>\n\n*Run: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*`
+            });
+
+      # ── 13. Cleanup ───────────────────────────────────────────────────────
+      - name: "🧹 Cleanup containers"
+        if: always()
+        run: |
+          echo "Stopping and removing all containers..."
+          docker compose down -v --remove-orphans
+          echo "✅ Cleanup complete"
