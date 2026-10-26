@@ -18,7 +18,11 @@ from jose import JWTError, jwt
 
 from config import settings
 from routers.health import router as health_router
-from routers.rounds import router as rounds_router
+from routers.rounds import init_rounds_router, router as rounds_router
+from routers.ws import init_ws_router, router as ws_router
+from services.crep import CREPEngine
+from services.logger import MerkleLogger
+from services.websocket import ConnectionManager
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -32,15 +36,31 @@ logger = logging.getLogger("arbiter")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Execute startup / shutdown hooks for the Arbiter service."""
+    """Execute startup / shutdown hooks for the Arbiter service.
+
+    Startup:
+        * Create the :class:`ConnectionManager` (WebSocket hub).
+        * Create the :class:`MerkleLogger` (Merkle-log HTTP client).
+        * Create the :class:`CREPEngine` with both injected dependencies.
+        * Wire the shared instances into the routers.
+    """
+    # ── Initialise shared services ───────────────────────────────────────
+    ws_manager = ConnectionManager()
+    merkle_url = f"http://{settings.MERKLE_HOST}:{settings.MERKLE_PORT}"
+    merkle_logger = MerkleLogger(merkle_url)
+    crep_engine = CREPEngine(ws_manager=ws_manager, merkle_logger=merkle_logger)
+
+    # ── Wire into routers ────────────────────────────────────────────────
+    init_rounds_router(crep_engine)
+    init_ws_router(ws_manager)
+
     logger.info("Arbiter service started")
-    logger.info(
-        "Merkle-log target: %s:%s",
-        settings.MERKLE_HOST,
-        settings.MERKLE_PORT,
-    )
+    logger.info("Merkle-log target: %s", merkle_url)
     logger.info("LLM plane target: %s", settings.LLM_PLANE_URL)
+    logger.info("WebSocket hub ready on /ws/events")
+
     yield
+
     logger.info("Arbiter service shutting down")
 
 
@@ -109,3 +129,4 @@ async def inject_plane_identity(request: Request, call_next):
 # ── Routers ──────────────────────────────────────────────────────────────────
 app.include_router(health_router)
 app.include_router(rounds_router)
+app.include_router(ws_router)

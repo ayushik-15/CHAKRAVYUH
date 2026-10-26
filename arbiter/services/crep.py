@@ -11,6 +11,11 @@ Implements the full lifecycle of an evaluation round:
 
 The engine enforces strict state-machine transitions — every method validates
 that the round is in the expected status before proceeding.
+
+After every successful transition the engine:
+    * Logs the event to the Merkle transparency log (via :class:`MerkleLogger`).
+    * Broadcasts the updated round state over WebSockets (via
+      :class:`ConnectionManager`).
 """
 
 from __future__ import annotations
@@ -30,6 +35,8 @@ from nacl.public import PrivateKey, SealedBox
 from config import settings
 from models.events import EvalEvent, EventType
 from models.round import Round, RoundStatus
+from services.logger import MerkleLogger
+from services.websocket import ConnectionManager
 
 logger = logging.getLogger("arbiter.crep")
 
@@ -45,9 +52,19 @@ class CREPEngine:
             to the Blue plane or any external consumer.
         _events: Append-only log of :class:`EvalEvent` instances per round.
         _round_timings: Timing metadata used to derive latency scores.
+        _ws_manager: WebSocket connection manager for real-time broadcasts.
+        _merkle_logger: Client for the Merkle transparency-log service.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        ws_manager: ConnectionManager,
+        merkle_logger: MerkleLogger,
+    ) -> None:
+        # ── Injected dependencies ────────────────────────────────────────
+        self._ws_manager = ws_manager
+        self._merkle_logger = merkle_logger
+
         # ── X25519 keypair for SealedBox ─────────────────────────────────
         self._private_key = PrivateKey.generate()
         self._public_key = self._private_key.public_key
@@ -95,7 +112,7 @@ class CREPEngine:
         event_type: EventType,
         data: dict[str, Any] | None = None,
     ) -> EvalEvent:
-        """Append an event to the round's event log and return it."""
+        """Append an event to the round's in-memory event log and return it."""
         event = EvalEvent(
             event_type=event_type,
             round_id=round_id,
@@ -105,11 +122,41 @@ class CREPEngine:
         logger.info("Event %s logged for round %s", event_type.value, round_id)
         return event
 
+    def _round_summary(self, rnd: Round) -> dict[str, Any]:
+        """Produce a JSON-safe summary of a round for broadcasting."""
+        return {
+            "type": "round_update",
+            "round_id": str(rnd.id),
+            "status": rnd.status.value,
+            "commitment_hash": rnd.commitment_hash,
+            "verdict": rnd.verdict,
+            "created_at": rnd.created_at.isoformat(),
+            "updated_at": rnd.updated_at.isoformat(),
+        }
+
+    async def _post_transition(
+        self,
+        rnd: Round,
+        event_type: EventType,
+        event_data: dict[str, Any] | None = None,
+    ) -> None:
+        """Actions common to every successful state transition.
+
+        1. Record the event in-memory.
+        2. Log to the Merkle transparency log (async, best-effort).
+        3. Broadcast the updated round to all WebSocket clients.
+        """
+        self._log_event(rnd.id, event_type, event_data)
+        await self._merkle_logger.log_event(
+            event_type.value, rnd.id, event_data or {},
+        )
+        await self._ws_manager.broadcast(self._round_summary(rnd))
+
     # ──────────────────────────────────────────────────────────────────────
-    # Public API
+    # Public API — all async
     # ──────────────────────────────────────────────────────────────────────
 
-    def create_round(self) -> Round:
+    async def create_round(self) -> Round:
         """Create a new evaluation round.
 
         Returns:
@@ -119,11 +166,12 @@ class CREPEngine:
         rnd = Round(id=round_id, status=RoundStatus.CREATED)
         self._rounds[round_id] = rnd
         self._round_timings[round_id] = {"created_at": time.monotonic()}
-        self._log_event(round_id, EventType.ROUND_START)
+
+        await self._post_transition(rnd, EventType.ROUND_START)
         logger.info("Round %s created.", round_id)
         return rnd
 
-    def receive_commitment(self, round_id: UUID, commitment_hash: str) -> Round:
+    async def receive_commitment(self, round_id: UUID, commitment_hash: str) -> Round:
         """Record a commitment hash from the Red plane.
 
         Args:
@@ -143,15 +191,15 @@ class CREPEngine:
         rnd.status = RoundStatus.COMMITTED
         self._touch(rnd)
 
-        self._log_event(
-            round_id,
+        await self._post_transition(
+            rnd,
             EventType.COMMITMENT_RECEIVED,
             {"commitment_hash": commitment_hash},
         )
         logger.info("Commitment received for round %s.", round_id)
         return rnd
 
-    def receive_sealed_payload(self, round_id: UUID, sealed_payload_b64: str) -> Round:
+    async def receive_sealed_payload(self, round_id: UUID, sealed_payload_b64: str) -> Round:
         """Decrypt a sealed payload from the Red plane.
 
         The payload is encrypted with the Arbiter's X25519 public key using
@@ -193,8 +241,8 @@ class CREPEngine:
         self._touch(rnd)
         self._round_timings[round_id]["payload_received_at"] = time.monotonic()
 
-        self._log_event(
-            round_id,
+        await self._post_transition(
+            rnd,
             EventType.PAYLOAD_SEALED,
             {"payload_length": len(plaintext)},
         )
@@ -253,15 +301,15 @@ class CREPEngine:
         rnd.status = RoundStatus.EVALUATING
         self._touch(rnd)
 
-        self._log_event(
-            round_id,
+        await self._post_transition(
+            rnd,
             EventType.LLM_RESPONSE,
             {"response_length": len(llm_response)},
         )
         logger.info("LLM response received for round %s (%d chars).", round_id, len(llm_response))
         return llm_response
 
-    def receive_verdict(
+    async def receive_verdict(
         self,
         round_id: UUID,
         verdict: str,
@@ -286,8 +334,8 @@ class CREPEngine:
         rnd.status = RoundStatus.VERDICT_RECEIVED
         self._touch(rnd)
 
-        self._log_event(
-            round_id,
+        await self._post_transition(
+            rnd,
             EventType.VERDICT_SUBMITTED,
             {
                 "verdict": verdict,
@@ -301,7 +349,7 @@ class CREPEngine:
         )
         return rnd
 
-    def verify_reveal(
+    async def verify_reveal(
         self,
         round_id: UUID,
         payload: str,
@@ -347,23 +395,14 @@ class CREPEngine:
 
         if match:
             rnd.status = RoundStatus.VERIFIED
-            self._log_event(
-                round_id,
-                EventType.REVEAL_VERIFIED,
-                {"computed_hash": computed_hash, "match": True},
-            )
-            logger.info("Reveal VERIFIED for round %s.", round_id)
+            event_data = {"computed_hash": computed_hash, "match": True}
         else:
             rnd.status = RoundStatus.FAILED
-            self._log_event(
-                round_id,
-                EventType.REVEAL_VERIFIED,
-                {
-                    "computed_hash": computed_hash,
-                    "expected_hash": rnd.commitment_hash,
-                    "match": False,
-                },
-            )
+            event_data = {
+                "computed_hash": computed_hash,
+                "expected_hash": rnd.commitment_hash,
+                "match": False,
+            }
             logger.warning(
                 "Reveal FAILED for round %s — hash mismatch "
                 "(computed=%s, expected=%s).",
@@ -371,6 +410,11 @@ class CREPEngine:
             )
 
         self._touch(rnd)
+        await self._post_transition(rnd, EventType.REVEAL_VERIFIED, event_data)
+
+        if match:
+            logger.info("Reveal VERIFIED for round %s.", round_id)
+
         return match, rnd
 
     # ──────────────────────────────────────────────────────────────────────
@@ -426,4 +470,3 @@ class CREPEngine:
             scores["llm_latency_seconds"] = round(received - sent, 4)
 
         return scores
-

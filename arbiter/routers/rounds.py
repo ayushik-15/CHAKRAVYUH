@@ -12,7 +12,7 @@ import base64
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from models.round import (
     CommitRequest,
@@ -29,9 +29,28 @@ logger = logging.getLogger("arbiter.rounds")
 
 router = APIRouter(tags=["rounds"])
 
-# ── Singletons (created once, shared across requests) ────────────────────────
-_crep_engine = CREPEngine()
+# ── Shared references (wired at startup from main.py) ────────────────────────
+_crep_engine: CREPEngine | None = None
 _plane_router = PlaneRouter()
+
+
+def init_rounds_router(engine: CREPEngine) -> None:
+    """Inject the global :class:`CREPEngine` into this module.
+
+    Called from :func:`main.lifespan`.
+    """
+    global _crep_engine  # noqa: PLW0603
+    _crep_engine = engine
+
+
+def _engine() -> CREPEngine:
+    """Return the CREP engine, or 503 if not yet initialised."""
+    if _crep_engine is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="CREP engine not yet initialised — try again shortly.",
+        )
+    return _crep_engine
 
 
 # ── Dependency helpers ───────────────────────────────────────────────────────
@@ -59,7 +78,7 @@ async def create_round(request: Request) -> RoundResponse:
     role = _plane_role(request)
     _plane_router.enforce(role, "/round/new")
 
-    rnd = _crep_engine.create_round()
+    rnd = await _engine().create_round()
     return RoundResponse(round=rnd)
 
 
@@ -73,7 +92,7 @@ async def commit(round_id: UUID, body: CommitRequest, request: Request) -> Round
     role = _plane_role(request)
     _plane_router.enforce(role, f"/round/{round_id}/commit")
 
-    rnd = _crep_engine.receive_commitment(round_id, body.commitment_hash)
+    rnd = await _engine().receive_commitment(round_id, body.commitment_hash)
     return RoundResponse(round=rnd)
 
 
@@ -92,13 +111,13 @@ async def payload(round_id: UUID, body: PayloadRequest, request: Request) -> Rou
     role = _plane_role(request)
     _plane_router.enforce(role, f"/round/{round_id}/payload")
 
-    rnd = _crep_engine.receive_sealed_payload(round_id, body.sealed_payload)
+    await _engine().receive_sealed_payload(round_id, body.sealed_payload)
 
     # Automatically forward the decrypted payload to the LLM plane
-    await _crep_engine.forward_to_llm(round_id)
+    await _engine().forward_to_llm(round_id)
 
     # Re-fetch the round after forwarding (status is now EVALUATING)
-    rnd = _crep_engine.get_round(round_id)
+    rnd = _engine().get_round(round_id)
     return RoundResponse(round=rnd)
 
 
@@ -114,7 +133,7 @@ async def scores(round_id: UUID, request: Request) -> dict:
     role = _plane_role(request)
     _plane_router.enforce(role, f"/round/{round_id}/scores")
 
-    return _crep_engine.get_derived_scores(round_id)
+    return _engine().get_derived_scores(round_id)
 
 
 @router.post(
@@ -127,7 +146,7 @@ async def verdict(round_id: UUID, body: VerdictRequest, request: Request) -> Rou
     role = _plane_role(request)
     _plane_router.enforce(role, f"/round/{round_id}/verdict")
 
-    rnd = _crep_engine.receive_verdict(
+    rnd = await _engine().receive_verdict(
         round_id,
         body.verdict,
         body.confidence,
@@ -150,7 +169,7 @@ async def reveal(round_id: UUID, body: RevealRequest, request: Request) -> dict:
     role = _plane_role(request)
     _plane_router.enforce(role, f"/round/{round_id}/reveal")
 
-    match, rnd = _crep_engine.verify_reveal(round_id, body.payload, body.nonce)
+    match, rnd = await _engine().verify_reveal(round_id, body.payload, body.nonce)
 
     return {
         "verified": match,
@@ -171,7 +190,7 @@ async def round_status(round_id: UUID, request: Request) -> dict:
     role = _plane_role(request)
     _plane_router.enforce(role, f"/round/{round_id}/status")
 
-    rnd = _crep_engine.get_round(round_id)
+    rnd = _engine().get_round(round_id)
     return {
         "round_id": str(rnd.id),
         "status": rnd.status.value,
@@ -192,7 +211,7 @@ async def verify(round_id: UUID, request: Request) -> dict:
     role = _plane_role(request)
     _plane_router.enforce(role, f"/round/{round_id}/verify")
 
-    rnd = _crep_engine.get_round(round_id)
+    rnd = _engine().get_round(round_id)
     return {
         "round_id": str(rnd.id),
         "status": rnd.status.value,
@@ -213,9 +232,8 @@ async def pubkey(request: Request) -> dict:
     role = _plane_role(request)
     _plane_router.enforce(role, "/arbiter/pubkey")
 
-    raw_key = _crep_engine.get_public_key()
+    raw_key = _engine().get_public_key()
     return {
         "public_key": base64.b64encode(raw_key).decode("ascii"),
         "algorithm": "X25519-SealedBox",
     }
-
