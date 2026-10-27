@@ -23,6 +23,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Health check ─────────────────────────────────────────────────────────────
+
+
+@app.get("/health")
+async def health_check() -> dict:
+    """Return service health status for Docker/CI readiness probes."""
+    return {"status": "healthy", "service": "arbiter"}
+
+
 # ── Mock event cycle ────────────────────────────────────────────────────────
 
 MOCK_EVENTS = [
