@@ -38,7 +38,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all source files
-COPY . .
+COPY leak-suite/ .
 
 # Create results directory
 RUN mkdir -p /app/results

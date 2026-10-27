@@ -3,8 +3,8 @@ version: "3.9"
 services:
   red-plane:
     build:
-      context: ./planes/red
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: planes/red/Dockerfile
     container_name: chakravyuh-red-plane
     networks:
       - net-red
@@ -12,8 +12,8 @@ services:
 
   blue-plane:
     build:
-      context: ./planes/blue
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: planes/blue/Dockerfile
     container_name: chakravyuh-blue-plane
     networks:
       - net-blue
@@ -21,8 +21,8 @@ services:
 
   llm-plane:
     build:
-      context: ./planes/llm
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: planes/llm/Dockerfile
     container_name: chakravyuh-llm-plane
     networks:
       - net-llm
@@ -30,8 +30,8 @@ services:
 
   arbiter:
     build:
-      context: ./arbiter
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: arbiter/Dockerfile
     container_name: chakravyuh-arbiter
     ports:
       - "8000:8000"
@@ -49,8 +49,8 @@ services:
 
   merkle-log:
     build:
-      context: ./merkle-log
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: merkle-log/Dockerfile
     container_name: chakravyuh-merkle-log
     ports:
       - "8001:8001"
@@ -88,8 +88,8 @@ services:
 
   leak-suite:
     build:
-      context: ./leak-suite
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: leak-suite/Dockerfile
     container_name: chakravyuh-leak-suite
     networks:
       - net-internal
