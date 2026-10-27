@@ -35,3 +35,7 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Test & Benchmark Results
+leak-suite/results/*
+!leak-suite/results/.gitkeep
