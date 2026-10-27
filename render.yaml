@@ -3,14 +3,20 @@ services:
     name: chakravyuh-arbiter
     env: python
     rootDir: arbiter
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    buildCommand: pip install -r ../requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
     plan: free
 
   - type: web
     name: chakravyuh-merkle
     env: python
     rootDir: merkle-log
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    buildCommand: pip install -r ../requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
     plan: free
