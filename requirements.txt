@@ -1,0 +1,35 @@
+# ============================================================
+# CHAKRAVYUH — Unified Python Dependencies
+# ============================================================
+# Consolidated from: arbiter/, merkle-log/, leak-suite/,
+#                    planes/red/, planes/blue/, planes/llm/
+# ============================================================
+
+# --- Web Framework & Server ---
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings>=2.1.0
+
+# --- HTTP Clients ---
+httpx==0.25.2
+requests>=2.31.0
+
+# --- Cryptography & Auth ---
+python-jose[cryptography]==3.3.0
+pynacl>=1.5.0
+cryptography>=41.0.7
+
+# --- Database ---
+asyncpg==0.29.0
+
+# --- WebSockets ---
+websockets==12.0
+
+# --- Environment ---
+python-dotenv==1.0.0
+
+# --- Leak Suite & Benchmarks ---
+numpy>=1.24.0
+tabulate>=0.9.0
+click>=8.1.0

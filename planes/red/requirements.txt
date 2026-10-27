@@ -1,9 +1,0 @@
-# Red Plane - Attacker dependencies
-# CREP protocol: HTTP client for Arbiter communication
-requests>=2.31.0
-
-# Cryptography: X25519+XSalsa20Poly1305 SealedBox for sealed payloads
-pynacl>=1.5.0
-
-# Additional cryptographic utilities (hashing, key derivation)
-cryptography>=41.0.0
