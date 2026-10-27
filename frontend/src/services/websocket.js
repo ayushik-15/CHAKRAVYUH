@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 
-export const useWebSocket = (url = 'wss://[chakravyuh-arbiter.onrender.com/ws/events](https://chakravyuh-arbiter.onrender.com/ws/events)') => {
+export const useWebSocket = (url = 'wss://chakravyuh-arbiter.onrender.com/ws/events') => {
     const [isConnected, setIsConnected] = useState(false);
     const [messages, setMessages] = useState([]);
     const ws = useRef(null);
