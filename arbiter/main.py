@@ -56,6 +56,7 @@ MOCK_EVENTS = [
 
 
 @app.websocket("/ws")
+@app.websocket("/ws/events")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """Accept a WebSocket connection and stream mock CREP events."""
     await websocket.accept()
